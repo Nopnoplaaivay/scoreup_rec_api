@@ -1,0 +1,69 @@
+from flask import Blueprint, request, jsonify
+
+from src.model.agent import Agent
+from src.db.mongodb import Database
+from src.modules.environment import Environment
+from src.utils.logger import Logger
+
+logger = Logger().get_logger()
+
+bp_rec = Blueprint('recommend', __name__)
+
+'''Intialize Database and Environment and Agent'''
+db = Database()
+env = Environment(db, cur_chapter="chuong-1")
+agent = Agent(env=env)
+
+@bp_rec.route("/recommend_action", methods=["POST"])
+def recommend_action():
+    global env, agent
+    data = request.json
+    try:
+        if "user_id" not in data or "cur_chapter" not in data:
+            return jsonify({"status": "error", "message": "Missing key in request data"}), 400
+        
+        user_id = data["user_id"]
+        cur_chapter = data["cur_chapter"]
+
+        '''Update ENV'''
+        if cur_chapter != env.cur_chapter:
+            env = Environment(db, cur_chapter)
+            agent = Agent(env=env)
+
+        '''Convert state'''
+        if "state" in data:
+            raw_state = data["state"]
+            state = env.convert_state(raw_state)
+            action = int(agent.choose_action(state))
+            exercise_id = env.get_exercise_by_action(action)
+
+            rec_message = db.get_exercise_message(exercise_id, user_id)
+            rec_message = rec_message if rec_message else None
+
+            exercise = db.questions.find_one({"encoded_exercise_id": action})
+            return jsonify({"action": action, "exercise": exercise, "rec_message": rec_message}), 200
+        else:
+            logger.info("No state provided, extracting from logs")
+            chapters_num = cur_chapter.split("-")[-1]
+            chapters = [f"chuong-{i}" for i in range(1, int(chapters_num) + 1)]
+            user_log_cursor = db.logs.find({"user_id": user_id, "chapter": {"$in": chapters}}).sort("timestamp", -1).limit(1)
+            user_logs = list(user_log_cursor)
+            if not user_logs:
+                raise ValueError("No logs found for the given user and chapters")
+
+            user_log = user_logs[0]
+            state = env.extract_state(user_log)[1]
+            action = int(agent.choose_action(state))
+            exercise_id = env.get_exercise_by_action(action)
+
+            rec_message = db.get_exercise_message(exercise_id, user_id)
+            rec_message = rec_message if rec_message else None
+
+            exercise = db.questions.find_one({"encoded_exercise_id": action})
+            return jsonify({"action": action, "exercise": exercise, "rec_message": rec_message}), 200
+    except KeyError as e:
+        return jsonify({"status": "error", "message": f"Missing key in request data: {str(e)}"}), 400
+    except ValueError as e:
+        return jsonify({"status": "error", "message": str(e)}), 404
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
