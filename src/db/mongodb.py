@@ -2,12 +2,10 @@ import os
 import numpy as np
 
 from pymongo import MongoClient, DESCENDING
-from src.utils.logger import Logger
-
-logger = Logger().get_logger()
+from src.utils.logger import LOGGER
 
 
-class Database:
+class MongoDBManager:
     """Khỏi tạo course_id Nhập môn Công nghệ thông tin"""
 
     def __init__(self, course_id="c3a788eb31f1471f9734157e9516f9b6"):
@@ -29,10 +27,10 @@ class Database:
     def check_connection(self):
         try:
             databases = self.client.list_database_names()
-            print("Connection successful!")
-            print("Databases:", databases)
+            LOGGER.info("Connection successful!")
+            LOGGER.info(f"Databases: {databases}")
         except Exception as e:
-            print("Connection failed:", e)
+            LOGGER.error(f"Connection failed: {e}")
 
     """2. Cập nhật không gian hành động dựa trên chương hiện tại"""
 
@@ -69,8 +67,6 @@ class Database:
                     {"$set": {"encoded_exercise_id": exercise["encoded_exercise_id"]}},
                 )
 
-        
-
     """4. Mã hóa các khái niệm kiến thức"""
 
     def encode_knowledge_concepts(self):
@@ -82,12 +78,12 @@ class Database:
         for idx, concept in enumerate(kncp_list):
             binary_code = format(idx, "0{}b".format(num_bits))
             concept_mapping[concept] = binary_code
-            print(concept, idx, binary_code)
+            LOGGER.info(concept, idx, binary_code)
 
         # Save to mongodb
         for concept, code in concept_mapping.items():
             self.kncp.update_one({"_id": concept}, {"$set": {"binary_code": code}})
-        Print.success("Knowledge concepts encoded successfully!")
+        LOGGER.info("Knowledge concepts encoded successfully!")
 
     """5. Cập nhật các phạm trù kiến thức của logs"""
 
@@ -98,8 +94,8 @@ class Database:
             # If knowledge concept of log is not in kncp_list, remove log
             if log["knowledge_concept"] not in kncp_list:
                 self.logs.delete_one({"_id": log["_id"]})
-                # print(f"Log {log['_id']} removed!")
-        Print.success("Knowledge concepts of logs updated successfully!")
+                # LOGGER.info(f"Log {log['_id']} removed!")
+        LOGGER.info("Knowledge concepts of logs updated successfully!")
 
     """6. Cập nhật độ khó cho bài tập"""
 
@@ -135,15 +131,13 @@ class Database:
                 high_scoring_group = accuracies[accuracies >= high_threshold]
                 low_scoring_group = accuracies[accuracies <= low_threshold]
 
-                exercise_difficulty = (
-                    1 - (np.mean(high_scoring_group) + np.mean(low_scoring_group)) / 2
-                )
-            # print(f"Exercise Difficulty: {exercise_difficulty:.2f}")
+                exercise_difficulty = (np.mean(high_scoring_group) + np.mean(low_scoring_group)) / 2
+            # LOGGER.info(f"Exercise Difficulty: {exercise_difficulty:.2f}")
 
             self.questions.update_one(
                 {"_id": ques_id}, {"$set": {"difficulty": exercise_difficulty}}
             )
-        Print.success("Difficulties for exercises updated successfully!")
+        LOGGER.info("Difficulties for exercises updated successfully!")
         # Update difficulty for log
         logs = self.logs.find()
         for log in logs:
@@ -153,7 +147,7 @@ class Database:
             self.logs.update_one(
                 {"_id": log["_id"]}, {"$set": {"difficulty": difficulty}}
             )
-        Print.success("Difficulties for logs updated successfully!")
+        LOGGER.info("Difficulties for logs updated successfully!")
 
     """7. Kiểm tra logs không tồn tại trong không gian hành động"""
 
@@ -162,9 +156,9 @@ class Database:
         logs_exer_ids = [log["exercise_id"] for log in self.logs.find()]
         for log_exer_id in logs_exer_ids:
             if log_exer_id not in exercise_ids:
-                Print.warning(f"Exercise {log_exer_id} not in action space!")
+                LOGGER.warning(f"Exercise {log_exer_id} not in action space!")
                 self.logs.delete_one({"exercise_id": log_exer_id})
-        Print.success("Logs reset successfully!")
+        LOGGER.info("Logs reset successfully!")
 
     """8. Update chapter cho logs"""
 
@@ -175,7 +169,7 @@ class Database:
             question = self.questions.find_one({"_id": exercise_id})
             chapter = question["chapter"]
             self.logs.update_one({"_id": log["_id"]}, {"$set": {"chapter": chapter}})
-        Print.success("Chapters for logs updated successfully!")
+        LOGGER.info("Chapters for logs updated successfully!")
 
     """9. Update knowledge concepts cho logs"""
     def get_exercise_message(self, exercise_id, user_id):
@@ -205,7 +199,7 @@ class Database:
                 else:
                     return {"message": "easy", "value": difficulty}
         except Exception as e:
-            print(e)
+            LOGGER.info(e)
             return {"message": None}
         
 
